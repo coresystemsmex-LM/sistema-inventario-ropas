@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Punto de Venta e Inventario Inteligente</title>
+  
+  <!-- Dependencias externas gratuitas y ligeras -->
+  <!-- 1. Escáner de cámara QR -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <!-- 2. Motor de PDF nativo para generación A4 en navegador -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
+    }
+
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; }
+    body { background-color: var(--bg); color: var(--text); padding-bottom: 40px; }
+
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    h1 { font-size: 1.25rem; font-weight: 700; color: #0f172a; }
+
+    /* Barra de Navegación por Pestañas */
+    .tabs {
+      display: flex;
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      padding: 0 1rem;
+      gap: 1rem;
+    }
+
+    .tab-btn {
+      padding: 0.85rem 1rem;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    .container { max-width: 900px; margin: 1.5rem auto; padding: 0 1rem; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .btn {
+      padding: 0.65rem 1.2rem;
+      border-radius: 6px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-warning { background: var(--warning); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+    /* Formulario y Controles */
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.35rem; }
+    input, select, textarea {
+      width: 100%;
+      padding: 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+
+    /* Tabla de Inventario */
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.88rem; }
+    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: #f1f5f9; color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; }
+
+    .badge {
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-disponible { background: #dcfce7; color: #15803d; }
+    .badge-apartado { background: #fef3c7; color: #b45309; }
+    .badge-vendido { background: #fee2e2; color: #b91c1c; }
+
+    #reader { width: 100%; max-width: 480px; margin: 0 auto; border-radius: 8px; overflow: hidden; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>👗 Sistema Tienda & Inventario</h1>
+    <span id="sync-status" style="font-size:0.85rem; color:var(--text-muted)">🟢 Sincronizado</span>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" onclick="switchTab('tab-pos')">📷 Escáner & Caja</button>
+    <button class="tab-btn" onclick="switchTab('tab-etiquetas')">🖨️ Etiquetas A4</button>
+    <button class="tab-btn" onclick="switchTab('tab-inventario')">📦 Inventario Completo</button>
+  </nav>
+
+  <main class="container">
+
+    <!-- ============================================================
+         PESTAÑA 1: ESCÁNER, EDICIÓN Y DICTADO POR VOZ (MÓDULOS 1 Y 3)
+         ============================================================ -->
+    <section id="tab-pos" class="tab-content active">
+      <div class="card">
+        <h3>1. Escaneo de Prenda (Cámara QR)</h3>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:1rem;">
+          Enfoca la etiqueta para cargar los datos y editar o registrar la venta.
+        </p>
+        <div id="reader"></div>
+        <div style="text-align: center; margin-top: 0.5rem;">
+          <button class="btn btn-outline" id="btn-toggle-cam" onclick="toggleCamera()">Iniciar Cámara</button>
+        </div>
+      </div>
+
+      <!-- Ficha de la Prenda Escaneada (Edición interactiva) -->
+      <div class="card" id="card-producto" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+          <h3>Ficha de la Prenda: <span id="view-sku" style="color:var(--primary)"></span></h3>
+          <span id="view-badge" class="badge"></span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+          <div class="form-group">
+            <label>Nombre:</label>
+            <input type="text" id="edit-nombre">
+          </div>
+          <div class="form-group">
+            <label>Precio de Venta ($):</label>
+            <input type="number" id="edit-precio">
+          </div>
+          <div class="form-group">
+            <label>Talla:</label>
+            <input type="text" id="edit-talla">
+          </div>
+          <div class="form-group">
+            <label>Color:</label>
+            <input type="text" id="edit-color">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+          <button class="btn btn-outline" onclick="guardarEdicionDirecta()">💾 Guardar Cambios en Excel</button>
+        </div>
+
+        <hr style="margin: 1.25rem 0; border: 0; border-top: 1px solid var(--border);">
+
+        <!-- Entrada Asistida por IA (Gemini Voice Module) -->
+        <h4>Operación Rápida (Voz o Texto con Gemini)</h4>
+        <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom:0.75rem;">
+          Dicta o escribe: ej. <em>"Apartado con 150 pesos en efectivo de Sofía Ramos cel 6681234567"</em>
+        </p>
+        <div style="display:flex; gap:0.5rem;">
+          <input type="text" id="prompt-input" placeholder="Escribe o pulsa el micrófono para dictar...">
+          <button class="btn btn-outline" id="btn-mic" onclick="toggleVoiceRecording()">🎤</button>
+          <button class="btn btn-primary" onclick="procesarConGemini()">Procesar</button>
+        </div>
+        <div id="gemini-feedback" style="margin-top:0.75rem; font-size:0.85rem;"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         PESTAÑA 2: GENERADOR DE ETIQUETAS A4 (MÓDULO 2)
+         ============================================================ -->
+    <section id="tab-etiquetas" class="tab-content">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+          <div>
+            <h3>Impresión de Etiquetas en Hoja A4</h3>
+            <p style="color:var(--text-muted); font-size:0.85rem;">
+              Filtro automático: <strong>Prendas DISPONIBLES sin etiqueta impresa</strong> (24 etiquetas por hoja A4, 3x8).
+            </p>
+          </div>
+          <button class="btn btn-success" onclick="generarPdfA4()">🖨️ Descargar PDF para Imprimir</button>
+        </div>
+
+        <div style="margin-top:1rem; display:flex; gap:0.5rem;">
+          <button class="btn btn-outline" onclick="seleccionarTodasEtiquetas(true)">Marcar Todas</button>
+          <button class="btn btn-outline" onclick="seleccionarTodasEtiquetas(false)">Desmarcar Todas</button>
+        </div>
+
+        <table id="tabla-etiquetas">
+          <thead>
+            <tr>
+              <th width="40"><input type="checkbox" id="check-master" onclick="toggleMasterCheck(this)"></th>
+              <th>SKU</th>
+              <th>Prenda</th>
+              <th>Talla / Color</th>
+              <th>Precio</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-etiquetas">
+            <!-- Filas dinámicas -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         PESTAÑA 3: INVENTARIO COMPLETO
+         ============================================================ -->
+    <section id="tab-inventario" class="tab-content">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3>Catálogo Maestro de Productos</h3>
+          <button class="btn btn-outline" onclick="cargarInventario()">🔄 Recargar</button>
+        </div>
+        <table id="tabla-inventario">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Prenda</th>
+              <th>Talla</th>
+              <th>Color</th>
+              <th>Precio</th>
+              <th>Estado</th>
+              <th>Etiqueta</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-inventario">
+            <!-- Filas dinámicas -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============================================================
+       SCRIPTS Y LÓGICA MODULAR DE LA APLICACIÓN
+       ============================================================ -->
+  <script>
+    // URL DEL WEBHOOK APPS SCRIPT
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby1lZ0bIlYjXomnkeryCmUR3Dr01OB52uCer4kVFPGbUSCN-hXOyjLkCIhpDCRHgCcg/exec";
+
+    let inventarioLocal = [];
+    let productoActivo = null;
+    let html5QrScanner = null;
+    let camaraActiva = false;
+
+    // --- CAMBIO DE PESTAÑAS ---
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // --- INICIALIZACIÓN Y CARGA DE DATOS ---
+    window.addEventListener('DOMContentLoaded', () => {
+      cargarInventario();
+    });
+
+    async function cargarInventario() {
+      document.getElementById('sync-status').innerText = '🟡 Sincronizando...';
+      try {
+        const res = await fetch(APPS_SCRIPT_URL);
+        const data = await res.json();
+        if (data.status === 'ok') {
+          inventarioLocal = data.data;
+          renderTablas();
+          document.getElementById('sync-status').innerText = '🟢 Sincronizado (' + inventarioLocal.length + ' prendas)';
+        }
+      } catch (err) {
+        console.error("Error al cargar inventario:", err);
+        document.getElementById('sync-status').innerText = '🔴 Error de conexión';
+      }
+    }
+
+    function renderTablas() {
+      // 1. Renderizar tabla de etiquetas (Solo DISPONIBLES y etiqueta_impresa !== 'SI')
+      const tbodyEtiquetas = document.getElementById('tbody-etiquetas');
+      tbodyEtiquetas.innerHTML = '';
+      
+      const pendientesEtiquetas = inventarioLocal.filter(p => 
+        (p.estado || '').toUpperCase() === 'DISPONIBLE' && (p.etiqueta_impresa || '').toUpperCase() !== 'SI'
+      );
+
+      pendientesEtiquetas.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><input type="checkbox" class="check-etiqueta" value="${p.sku}" checked></td>
+          <td><strong>${p.sku}</strong></td>
+          <td>${p.nombre}</td>
+          <td>${p.talla} / ${p.color}</td>
+          <td>$${Number(p.precio_venta).toFixed(2)}</td>
+        `;
+        tbodyEtiquetas.appendChild(tr);
+      });
+
+      // 2. Renderizar tabla general de inventario
+      const tbodyInventario = document.getElementById('tbody-inventario');
+      tbodyInventario.innerHTML = '';
+      inventarioLocal.forEach(p => {
+        const tr = document.createElement('tr');
+        const estadoBadge = p.estado === 'DISPONIBLE' ? 'badge-disponible' : (p.estado === 'APARTADO' ? 'badge-apartado' : 'badge-vendido');
+        tr.innerHTML = `
+          <td><strong>${p.sku}</strong></td>
+          <td>${p.nombre}</td>
+          <td>${p.talla}</td>
+          <td>${p.color}</td>
+          <td>$${Number(p.precio_venta).toFixed(2)}</td>
+          <td><span class="badge ${estadoBadge}">${p.estado}</span></td>
+          <td>${p.etiqueta_impresa === 'SI' ? '✅ Sí' : '❌ No'}</td>
+        `;
+        tbodyInventario.appendChild(tr);
+      });
+    }
+
+    // ============================================================
+    // MÓDULO 1: ESCÁNER QR Y EDICIÓN INTERACTIVA
+    // ============================================================
+    function toggleCamera() {
+      if (!camaraActiva) {
+        html5QrScanner = new Html5Qrcode("reader");
+        html5QrScanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 } },
+          (decodedText) => {
+            onScanSuccess(decodedText);
+          },
+          (err) => { /* Silenciar errores de lectura continua */ }
+        ).then(() => {
+          camaraActiva = true;
+          document.getElementById('btn-toggle-cam').innerText = "Detener Cámara";
+        }).catch(err => {
+          alert("Error al abrir cámara: " + err);
+        });
+      } else {
+        html5QrScanner.stop().then(() => {
+          camaraActiva = false;
+          document.getElementById('btn-toggle-cam').innerText = "Iniciar Cámara";
+        });
+      }
+    }
+
+    function onScanSuccess(sku) {
+      sku = sku.trim();
+      const prod = inventarioLocal.find(p => p.sku === sku);
+      if (prod) {
+        cargarProductoEnVista(prod);
+      } else {
+        alert("Prenda con SKU " + sku + " no encontrada en el inventario.");
+      }
+    }
+
+    function cargarProductoEnVista(prod) {
+      productoActivo = prod;
+      document.getElementById('card-producto').style.display = 'block';
+      document.getElementById('view-sku').innerText = prod.sku;
+      
+      const badge = document.getElementById('view-badge');
+      badge.innerText = prod.estado;
+      badge.className = 'badge ' + (prod.estado === 'DISPONIBLE' ? 'badge-disponible' : (prod.estado === 'APARTADO' ? 'badge-apartado' : 'badge-vendido'));
+
+      document.getElementById('edit-nombre').value = prod.nombre;
+      document.getElementById('edit-precio').value = prod.precio_venta;
+      document.getElementById('edit-talla').value = prod.talla;
+      document.getElementById('edit-color').value = prod.color;
+    }
+
+    async function guardarEdicionDirecta() {
+      if (!productoActivo) return;
+      const nuevoPrecio = document.getElementById('edit-precio').value;
+      const nuevaTalla = document.getElementById('edit-talla').value;
+      const nuevoColor = document.getElementById('edit-color').value;
+      const nuevoNombre = document.getElementById('edit-nombre').value;
+
+      document.getElementById('sync-status').innerText = '🟡 Guardando en Google Sheets...';
+      try {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify({
+            accion: 'EDITAR_PRODUCTO',
+            sku: productoActivo.sku,
+            nombre: nuevoNombre,
+            precio_venta: nuevoPrecio,
+            talla: nuevaTalla,
+            color: nuevoColor
+          })
+        });
+        const r = await res.json();
+        if (r.status === 'ok') {
+          alert('¡Prenda actualizada con éxito en Google Sheets!');
+          cargarInventario();
+        }
+      } catch (err) {
+        alert('Error al guardar: ' + err);
+      }
+    }
+
+    // ============================================================
+    // MÓDULO 2: GENERACIÓN DE ETIQUETAS A4 (24 por hoja, 3x8)
+    // ============================================================
+    function toggleMasterCheck(master) {
+      document.querySelectorAll('.check-etiqueta').forEach(ch => ch.checked = master.checked);
+    }
+
+    function seleccionarTodasEtiquetas(val) {
+      document.querySelectorAll('.check-etiqueta').forEach(ch => ch.checked = val);
+      document.getElementById('check-master').checked = val;
+    }
+
+    async function generarPdfA4() {
+      const seleccionados = [];
+      document.querySelectorAll('.check-etiqueta:checked').forEach(ch => {
+        const prod = inventarioLocal.find(p => p.sku === ch.value);
+        if (prod) seleccionados.push(prod);
+      });
+
+      if (seleccionados.length === 0) {
+        alert("Selecciona al menos una prenda para imprimir.");
+        return;
+      }
+
+      const { jsPDF } = window.jspdf;
+      // Documento A4 en milímetros: 210 x 297 mm
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+      const cols = 3;
+      const rows = 8;
+      const marginX = 10;
+      const marginY = 12;
+      const gapX = 4;
+      const gapY = 4;
+      const labelW = 60.7;
+      const labelH = 30.6;
+
+      for (let i = 0; i < seleccionados.length; i++) {
+        const prod = seleccionados[i];
+        const pageIdx = i % (cols * rows);
+        
+        if (i > 0 && pageIdx === 0) {
+          doc.addPage();
+        }
+
+        const col = pageIdx % cols;
+        const row = Math.floor(pageIdx / cols);
+        const x = marginX + col * (labelW + gapX);
+        const y = marginY + row * (labelH + gapY);
+
+        // Borde punteado de corte
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineDashPattern([1, 1], 0);
+        doc.roundedRect(x, y, labelW, labelH, 2, 2, 'S');
+        doc.setLineDashPattern([], 0);
+
+        // Generar QR en canvas oculto
+        const qrCanvas = document.createElement('canvas');
+        await new Promise(resolve => {
+          new QRCode(qrCanvas, {
+            text: prod.sku,
+            width: 80,
+            height: 80,
+            correctLevel: QRCode.CorrectLevel.M
+          });
+          setTimeout(resolve, 50);
+        });
+
+        // Insertar imagen del QR en el PDF (tamaño 20x20 mm)
+        const qrDataUrl = qrCanvas.toDataURL('image/png');
+        doc.addImage(qrDataUrl, 'PNG', x + 3, y + (labelH - 20) / 2, 20, 20);
+
+        // Textos del producto
+        const textX = x + 25;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(20, 20, 20);
+        doc.text((prod.nombre || '').substring(0, 22), textX, y + 6);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(80, 80, 80);
+        doc.text(`Talla: ${prod.talla} | ${prod.color}`, textX, y + 11);
+        doc.text(`SKU: ${prod.sku}`, textX, y + 16);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(15, 23, 42);
+        doc.text(`$${Number(prod.precio_venta).toFixed(2)}`, textX, y + 25);
+      }
+
+      doc.save(`etiquetas_A4_${new Date().toISOString().substring(0,10)}.pdf`);
+
+      // Marcar en Google Sheets como impresas automáticamente
+      const skusImpresos = seleccionados.map(p => p.sku);
+      fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+          accion: 'MARCAR_ETIQUETAS_IMPRESAS',
+          skus: skusImpresos
+        })
+      }).then(() => {
+        cargarInventario();
+      });
+    }
+
+    // ============================================================
+    // MÓDULO 3: ENTRADA DE VOZ Y CONEXIÓN CON GEMINI
+    // ============================================================
+    let recognition = null;
+    function toggleVoiceRecording() {
+      const btn = document.getElementById('btn-mic');
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        alert("El reconocimiento de voz no está soportado en este navegador. Puedes escribir el texto en el campo.");
+        return;
+      }
+      
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!recognition) {
+        recognition = new SpeechRecognition();
+        recognition.lang = 'es-MX';
+        recognition.onstart = () => { btn.style.background = '#fee2e2'; btn.innerText = '🔴 Grabando...'; };
+        recognition.onresult = (event) => {
+          document.getElementById('prompt-input').value = event.results[0][0].transcript;
+        };
+        recognition.onend = () => { btn.style.background = ''; btn.innerText = '🎤'; recognition = null; };
+        recognition.start();
+      } else {
+        recognition.stop();
+      }
+    }
+
+    async function procesarConGemini() {
+      const prompt = document.getElementById('prompt-input').value;
+      if (!prompt) return;
+
+      const feedback = document.getElementById('gemini-feedback');
+      feedback.innerHTML = '<em>Consultando a Gemini...</em>';
+
+      // Llamada al endpoint Serverless de Vercel (o llamada directa)
+      try {
+        const res = await fetch('/api/parse-voice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: prompt,
+            sku_activo: productoActivo ? productoActivo.sku : null
+          })
+        });
+        
+        const data = await res.json();
+        feedback.innerHTML = `<strong>Acción detectada:</strong> ${data.tipo_operacion} | Monto: $${data.monto_pagado || 0}`;
+
+        // Ejecutar acción en Google Sheets
+        if (data.tipo_operacion === 'VENTA' || data.tipo_operacion === 'APARTADO') {
+          await fetch(APPS_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+              accion: 'REGISTRAR_MOVIMIENTO',
+              movimiento: {
+                sku: data.sku || (productoActivo ? productoActivo.sku : ''),
+                tipo_operacion: data.tipo_operacion,
+                monto_total: productoActivo ? productoActivo.precio_venta : data.monto_pagado,
+                monto_abonado: data.monto_pagado,
+                metodo_pago: data.metodo_pago,
+                cliente_id: data.cliente ? data.cliente.nombre : 'Cliente Mostrador'
+              }
+            })
+          });
+          alert('¡Movimiento guardado exitosamente en Google Sheets!');
+          cargarInventario();
+        }
+      } catch (err) {
+        feedback.innerText = "Error al procesar: " + err;
+      }
+    }
+  </script>
+</body>
+</html>
